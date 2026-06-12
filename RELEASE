@@ -1,0 +1,35 @@
+# RELEASE
+
+## Version: 1.0.1
+- Updated suspend and resume lifecycle handling to improve foreground recovery and restart behavior after unlock.
+- Added restart gating state for unlock-driven relaunch flow (`restartOnUserPresent`).
+- Improved scan robustness with documented WakeLock acquire and release lifecycle during RFID and barcode operations.
+- Refreshed design documentation with method-level lifecycle and scan flow traceability.
+- Added and integrated updated lifecycle flow image (`RWDemo-1.png`) in design docs.
+- Build configuration cleanup for newer toolchains (manifest/property cleanup and Java compatibility updates).
+- Tag: v1.0.1
+- Date: May 27, 2026
+
+## Version: 1.0.0
+- Modernized EPC result UI with per-tag card rows and count badges.
+- Added count threshold badge coloring for high-volume tag visibility.
+- Hidden top Unique/Total summary bar in favor of per-row count display.
+- Added `suspend_resume_device.sh` utility for ADB suspend/resume workflows.
+- Hardened `build_deploy_launch.sh` for wrapper recovery and robust device detection.
+- Updated documentation for DataWedge requirements, tested platforms, and compatibility matrix.
+- Date: May 26, 2026
+
+## Version: 0.0.1
+- Modularized DataWedge intent handling (DataWedgeHelper)
+- Improved user feedback (Toasts, dialogs)
+- Progress dialog for scanning operations
+- Documentation and onboarding improvements
+- Date: March 29, 2026
+
+## Version: 0.0.2
+- Consolidated DataWedge Notification API for real-time hardware status monitoring.
+- Implemented dual-status UI for Barcode Scanner and RFID Sled.
+- Added explicit SET_CONFIG result handling to detect missing hardware.
+- Modernized status bar UI with color-coded indicators.
+- Fixed duplicate class and package name conflicts.
+- Date: April 2, 2026

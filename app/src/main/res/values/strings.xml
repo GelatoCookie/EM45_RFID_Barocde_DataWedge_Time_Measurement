@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dwdemo2_app_name">Rfid DW Demo v1.0.2</string>
+    <string name="app_name">RFIDSolution</string>
+    <!-- Title for Latin keyboard  -->
+    <string name="ime_name">Sample Soft Keyboard</string>
+
+    <!-- Symbols that are commonly considered word separators in this language -->
+    <string name="word_separators">\u0020.,;:!?\n()[]*&amp;@{}/&lt;&gt;_+=|&quot;</string>
+
+    <!-- Labels on soft keys -->
+    <string name="label_go_key">Go</string>
+    <string name="label_next_key">Next</string>
+    <string name="label_send_key">Send</string>
+    <string name="color_picker_arrow">→</string>
+
+    <string name="status_scanner">Scanner: %1$s</string>
+    <string name="status_rfid">RFID: %1$s</string>
+    <string name="status_unknown">UNKNOWN</string>
+    <string name="status_no_plugin">No Plug-in</string>
+    <string name="status_unique">Unique: %1$s</string>
+    <string name="status_total">Total: %1$s</string>
+
+    <string name="status_reading">READING</string>
+    <string name="status_stopped">STOPPED</string>
+    <string name="no_tags_yet">Scan RFID/Barcode to see unique EPC cards</string>
+
+</resources>
