@@ -4,6 +4,393 @@
 This document details the architecture and flow of RFID and Barcode operations in the DataWedgeApp RfidECRT_RWDemo2 project.
 For onboarding and exact DataWedge profile values, see the DataWedge Profile Requirements section in [README.md](README.md#datawedge-profile-requirements).
 
+## RFID SDK Lifecycle
+The app uses the **Zebra DataWedge API** as the primary bridge to RFID hardware. The following sections describe the initialization sequence, interface selection, connection management, and lifecycle operations.
+
+## RFID SDK Lifecycle
+The app uses the **Zebra DataWedge API** as the primary bridge to RFID hardware. The following sections describe the initialization sequence, interface selection, connection management, and lifecycle operations.
+
+### 1. SDK Initialization (onCreate)
+
+The RFID SDK is initialized during `onCreate()` when the activity is first created:
+
+```java
+@Override
+public void onCreate(Bundle savedInstanceState) {
+    super.onCreate(savedInstanceState);
+    
+    // Initialize static context reference for SDK access
+    thisContext = getApplicationContext();
+    
+    // Create and register the system state receiver for suspend/resume events
+    systemStateReceiver = new SystemStateReceiver();
+    IntentFilter filter = new IntentFilter();
+    filter.addAction(Intent.ACTION_SCREEN_OFF);
+    filter.addAction(Intent.ACTION_USER_PRESENT);
+    registerReceiver(systemStateReceiver, filter);
+    
+    // Initialize broadcast receiver for DataWedge callbacks
+    datawedgeBroadcastReceiver = new BroadcastReceiver() { ... };
+    IntentFilter dwFilter = new IntentFilter();
+    dwFilter.addAction(RWDemoIntentParams.ACTION);
+    registerReceiver(datawedgeBroadcastReceiver, dwFilter);
+    
+    // Initialize wake lock for scan operations
+    PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+    if (pm != null) {
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RWDemo:ScanWakeLock");
+    }
+    
+    // Initialize handler for async operations
+    timeoutHandler = new Handler(Looper.getMainLooper());
+}
+```
+
+**Key points:**
+- Static `thisContext` is set once for SDK method access.
+- Broadcast receivers are registered for DataWedge API messages and system state events.
+- WakeLock is created but **not** held until a scan starts.
+- Handler is created for timeout management during scanning operations.
+
+### 2. Profile Setup & Interface Selection (onResume)
+
+Upon `onResume()`, the app establishes communication with the RFID interface via DataWedge:
+
+```java
+@Override
+protected void onResume() {
+    super.onResume();
+    
+    // Start activation timer for tracking profile load time
+    activationTimerStartMs = SystemClock.elapsedRealtime();
+    
+    // Register for DataWedge notifications
+    registerForNotifications();
+    
+    // Launch background thread to check profile activation
+    new Thread(() -> {
+        long startTime = System.currentTimeMillis();
+        while (!rwDemoProfileActivated) {
+            if (System.currentTimeMillis() - startTime > activationTimeoutInMilliseconds) {
+                // Timeout: profile did not activate
+                runOnUiThread(() -> {
+                    playAlarmBeep(3);
+                    new AlertDialog.Builder(RWDemoActivity.this)
+                        .setTitle("Activation Timeout")
+                        .setMessage("Could not enable DataWedge profile. "
+                            + "Please ensure RFID hardware is connected and DataWedge is properly configured.")
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show();
+                });
+                break;
+            }
+            try {
+                Intent intent = new Intent();
+                intent.setAction(RWDemoIntentParams.ACTION);
+                intent.putExtra(GET_ACTIVE_PROFILE, "");
+                thisContext.sendBroadcast(intent);
+                Thread.sleep(softButtonUnfreezeDelayInMillisecnds);
+            } catch (Exception e) {
+                if (DEBUG) e.printStackTrace();
+            }
+        }
+    }).start();
+}
+```
+
+**Interface selection mechanism:**
+- Profile `"RWDemo"` is automatically created if not present (see `createProfile()`).
+- The profile bundles RFID, Barcode, Intent, and Keystroke plugin configurations.
+- RFID interface defaults to hardware-attached RFID reader (e.g., EM45 built-in RFID, or RFD40P via Bluetooth).
+- No explicit interface selection UI is needed; DataWedge auto-selects based on available hardware.
+
+### 3. Connection & Interface Query (registerForNotifications & queryStatus)
+
+The app connects to the RFID interface by registering for status notifications:
+
+```java
+private void registerForNotifications() {
+    // Register for scanner status notifications
+    Bundle b1 = new Bundle();
+    b1.putString(BUNDLE_EXTRA_APPLICATION_NAME, getPackageName());
+    b1.putString(BUNDLE_EXTRA_NOTIFICATION_TYPE, NOTIFICATION_TYPE_SCANNER_STATUS);
+    Intent i1 = new Intent();
+    i1.setAction(ACTION);
+    i1.putExtra(ACTION_EXTRA_REGISTER_FOR_NOTIFICATION, b1);
+    sendBroadcast(i1);
+    
+    // Register for RFID status notifications
+    Bundle b2 = new Bundle();
+    b2.putString(BUNDLE_EXTRA_APPLICATION_NAME, getPackageName());
+    b2.putString(BUNDLE_EXTRA_NOTIFICATION_TYPE, NOTIFICATION_TYPE_RFID_STATUS);
+    Intent i2 = new Intent();
+    i2.setAction(ACTION);
+    i2.putExtra(ACTION_EXTRA_REGISTER_FOR_NOTIFICATION, b2);
+    sendBroadcast(i2);
+}
+
+private void queryStatus() {
+    // Query scanner status
+    Intent i1 = new Intent();
+    i1.setAction(ACTION);
+    i1.putExtra(ACTION_EXTRA_SOFT_SCAN_TRIGGER, GET_SCANNER_STATUS);
+    sendBroadcast(i1);
+    
+    // Query RFID status
+    Intent i2 = new Intent();
+    i2.setAction(ACTION);
+    i2.putExtra(ACTION_EXTRA_SOFT_RFID_TRIGGER, GET_RFID_STATUS);
+    sendBroadcast(i2);
+}
+```
+
+**Connection flow:**
+1. Register for notifications → DataWedge acknowledges and begins sending status updates.
+2. Query status → DataWedge responds with current RFID and scanner states.
+3. Listener in `datawedgeBroadcastReceiver` processes responses and enables/disables trigger buttons.
+
+### 4. Connect to RFID Interface (startRfidScan)
+
+When the user taps the RFID trigger, a connection is established and data read begins:
+
+```java
+private void startRfidScan() {
+    if (rfidScanState) return; // Prevent double-clicks
+    rfidScanState = true;
+    
+    // Acquire wake lock to prevent CPU sleep during scan
+    acquireWakeLockSafely();
+    
+    // Show progress UI
+    showProgressDialog("Reading RFID... (Timeout in 5s)");
+    updateStatusUI(rfidStatusText, R.string.status_rfid, STATUS_SCANNING);
+    
+    // Send explicit START command to DataWedge
+    triggerHardware(ACTION_EXTRA_SOFT_RFID_TRIGGER, TRIGGER_START);
+    
+    // Set timeout to auto-stop after SCAN_TIMEOUT_MS (5 seconds)
+    rfidTimeoutRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (DEBUG) Log.i(TAG, "RFID timeout reached. Stopping hardware.");
+            stopRfidScan();
+        }
+    };
+    timeoutHandler.postDelayed(rfidTimeoutRunnable, SCAN_TIMEOUT_MS);
+}
+
+private void triggerHardware(String triggerExtra, String command) {
+    Intent i = new Intent();
+    i.setAction(RWDemoIntentParams.ACTION);
+    i.putExtra(triggerExtra, command);
+    sendBroadcast(i);
+}
+```
+
+**Connection establishment:**
+1. Wake lock acquired to ensure CPU stays on.
+2. `TRIGGER_START` intent sent to DataWedge.
+3. DataWedge activates RFID hardware and begins listening for tags.
+4. Status notifications arrive via broadcast.
+5. Tag data received via `onNewIntent()` callback.
+
+### 5. Disconnect from RFID Interface (stopRfidScan)
+
+Disconnection is initiated by user action or timeout:
+
+```java
+private void stopRfidScan() {
+    if (!rfidScanState) return;
+    rfidScanState = false;
+    
+    try {
+        // Cancel pending timeout callback
+        if (rfidTimeoutRunnable != null) {
+            timeoutHandler.removeCallbacks(rfidTimeoutRunnable);
+            rfidTimeoutRunnable = null;
+        }
+        
+        // Send explicit STOP command to DataWedge
+        triggerHardware(ACTION_EXTRA_SOFT_RFID_TRIGGER, TRIGGER_STOP);
+        
+        // Dismiss progress dialog and update UI
+        dismissProgressDialog();
+        updateStatusUI(rfidStatusText, R.string.status_rfid, STATUS_WAITING);
+    } finally {
+        // Always release wake lock in finally block
+        releaseWakeLockSafely();
+    }
+}
+
+private void acquireWakeLockSafely() {
+    if (wakeLock == null || wakeLock.isHeld()) {
+        return;
+    }
+    try {
+        wakeLock.acquire(SCAN_TIMEOUT_MS + 2000); // Timeout as safety measure
+    } catch (SecurityException e) {
+        Log.w(TAG, "WAKE_LOCK permission missing; continuing without WakeLock", e);
+    }
+}
+
+private void releaseWakeLockSafely() {
+    if (wakeLock == null || !wakeLock.isHeld()) {
+        return;
+    }
+    try {
+        wakeLock.release();
+    } catch (RuntimeException e) {
+        Log.w(TAG, "WakeLock release failed", e);
+    }
+}
+```
+
+**Disconnection flow:**
+1. Cancel pending timeout callback to prevent unwanted stops.
+2. Send `TRIGGER_STOP` intent to DataWedge.
+3. DataWedge stops RFID hardware and returns to idle state.
+4. UI updated to `STATUS_WAITING`.
+5. Wake lock released in `finally` block (guaranteed cleanup).
+
+### 6. Dispose & Cleanup (onPause/onDestroy)
+
+Resource cleanup occurs at multiple lifecycle points:
+
+```java
+@Override
+public void onPause() {
+    super.onPause();
+    
+    // Stop active scans to preserve battery
+    stopRfidScan();
+    stopBarcodeScan();
+    
+    // Mark profile as no longer active for next resume cycle
+    rwDemoProfileActivated = false;
+    
+    // Hide progress indicator
+    if (progressBar != null) {
+        progressBar.setVisibility(View.GONE);
+    }
+    
+    // Unregister for notifications
+    unRegisterForNotifications();
+    
+    // Unregister DataWedge receiver
+    try {
+        unregisterReceiver(datawedgeBroadcastReceiver);
+    } catch (IllegalArgumentException e) {
+        if (DEBUG) Log.d(TAG, "Receiver already unregistered: " + e.getMessage());
+    }
+    
+    // Trigger garbage collection
+    System.gc();
+}
+
+@Override
+public void onStop() {
+    super.onStop();
+    stopRfidScan();
+    stopBarcodeScan();
+    System.gc();
+}
+
+@Override
+protected void onDestroy() {
+    super.onDestroy();
+    
+    // Unregister system state receiver
+    if (systemStateReceiver != null) {
+        try {
+            unregisterReceiver(systemStateReceiver);
+            Log.d(TAG, "System state receiver unregistered.");
+        } catch (IllegalArgumentException e) {
+            // Already unregistered
+        }
+    }
+    
+    // Release wake lock if still held (defensive)
+    releaseWakeLockSafely();
+    
+    // Clear references
+    wakeLock = null;
+    timeoutHandler = null;
+    
+    System.gc();
+}
+
+private void unRegisterForNotifications() {
+    // Unregister scanner status notifications
+    Bundle b1 = new Bundle();
+    b1.putString(BUNDLE_EXTRA_APPLICATION_NAME, getPackageName());
+    b1.putString(BUNDLE_EXTRA_NOTIFICATION_TYPE, NOTIFICATION_TYPE_SCANNER_STATUS);
+    Intent i1 = new Intent();
+    i1.setAction(ACTION);
+    i1.putExtra(ACTION_EXTRA_UNREGISTER_FOR_NOTIFICATION, b1);
+    sendBroadcast(i1);
+    
+    // Unregister RFID status notifications
+    Bundle b2 = new Bundle();
+    b2.putString(BUNDLE_EXTRA_APPLICATION_NAME, getPackageName());
+    b2.putString(BUNDLE_EXTRA_NOTIFICATION_TYPE, NOTIFICATION_TYPE_RFID_STATUS);
+    Intent i2 = new Intent();
+    i2.setAction(ACTION);
+    i2.putExtra(ACTION_EXTRA_UNREGISTER_FOR_NOTIFICATION, b2);
+    sendBroadcast(i2);
+}
+```
+
+**Cleanup checklist:**
+- ✓ All active scans stopped.
+- ✓ Profile activation flag reset.
+- ✓ Broadcast receivers unregistered.
+- ✓ Notification registrations cancelled.
+- ✓ Wake lock released.
+- ✓ Handler references cleared.
+
+### 7. Reconnect & Resume (onResume after onPause)
+
+When the app returns from background or after suspend/resume:
+
+```java
+// In onResume():
+// 1. Reset activation state
+activationTimerStartMs = SystemClock.elapsedRealtime();
+rfidActivationTimeReported = false;
+barcodeWaitingTimeReported = false;
+
+// 2. Re-register for notifications
+registerForNotifications();
+
+// 3. Check if profile is still active
+// (Background thread polls GET_ACTIVE_PROFILE until activated or timeout)
+
+// In datawedgeBroadcastReceiver.onReceive():
+if (intent.hasExtra(RESULT_GET_ACTIVE_PROFILE)) {
+    String activeProfile = intent.getStringExtra(RESULT_GET_ACTIVE_PROFILE);
+    if (BUNDLE_EXTRA_PROFILE_NAME_VAL.equals(activeProfile)) {
+        if (!rwDemoProfileActivated) {
+            playSuccessBeep();
+        }
+        rwDemoProfileActivated = true;
+        softScanTrigger.setEnabled(true);
+        barcodeScanTrigger.setEnabled(true);
+        if (progressBar != null) {
+            progressBar.setVisibility(View.GONE);
+        }
+        updateStatusUI(rfidStatusText, R.string.status_rfid, STATUS_ACTIVATED, rfidElapsedText);
+        queryStatus();
+    }
+}
+```
+
+**Reconnection flow:**
+1. Reset all activation flags.
+2. Re-register for notifications.
+3. Poll for profile activation status.
+4. On successful activation, enable trigger buttons and query interface status.
+5. UI reflects `STATUS_ACTIVATED` with elapsed time metric.
+
 ## Tested Platforms
 - EM45
 - TC53e-RFID
