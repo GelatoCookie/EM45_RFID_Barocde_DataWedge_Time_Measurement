@@ -12,13 +12,16 @@ The app uses the **Zebra DataWedge API** as the primary bridge to RFID hardware.
 
 ### 1. SDK Initialization (onCreate)
 
-The RFID SDK is initialized during `onCreate()` when the activity is first created:
+The RFID SDK is initialized during `onCreate()` when the activity is first created. This now includes foreground conflict detection:
 
 ```java
 @Override
 public void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     
+    // Detect if competing Zebra demo apps are in foreground and background them
+    detectAndBackgroundOtherApp();
+
     // Initialize static context reference for SDK access
     thisContext = getApplicationContext();
     
@@ -254,13 +257,17 @@ private void releaseWakeLockSafely() {
 
 ### 6. Dispose & Cleanup (onPause/onDestroy)
 
-Resource cleanup occurs at multiple lifecycle points:
+Resource cleanup occurs at multiple lifecycle points. Backgrounding now triggers global deactivation and user alerts:
 
 ```java
 @Override
 public void onPause() {
     super.onPause();
     
+    // Notify user with alarm tones and deactivate DW globally
+    playPhoneAlarmTone(2);
+    deactivateDataWedge();
+
     // Stop active scans to preserve battery
     stopRfidScan();
     stopBarcodeScan();
@@ -403,6 +410,11 @@ if (intent.hasExtra(RESULT_GET_ACTIVE_PROFILE)) {
 | EM45 | NA | Not recorded | May 2026 |
 | TC53e-RFID | NA | Not recorded | May 2026 |
 | TC27-RFD40P | 15.0.77 / 11R01 | AT_FULL_UPDATE_14-35-10.00-UG-U127-STD-ATH-04 | May 2026 |
+
+## Release rel0.2 (1.0.3) Highlights
+- **Conflict Resolution**: Added startup logic to background `com.zebra.rfid.demo.sdksample` if it's in the foreground.
+- **Background Protection**: Global DataWedge deactivation on `onPause` with audible Alarm Tone alerts.
+- **Icon Refresh**: Modernized launcher and app icons with a barcode theme.
 
 ## Release 1.0.2 Highlights
 - On `ACTION_SCREEN_OFF`, the activity is moved to background with `moveTaskToBack(true)` after active scans are stopped.

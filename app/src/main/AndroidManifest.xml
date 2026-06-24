@@ -1,17 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
 
     <application
         android:exported="true"
-        android:icon="@drawable/rfid_icon_s"
+        android:icon="@drawable/ic_launcher"
         android:label="@string/rwdemo_app_name"
         android:persistent="true"
         android:resizeableActivity="false"
         android:theme="@android:style/Theme.DeviceDefault">
         <activity android:name=".FriendlyProfilesActivity"
-            android:icon="@drawable/rfid_icon_s"
+            android:icon="@drawable/ic_launcher"
             android:label="@string/dwdemo2_app_name"
             android:launchMode="singleInstance"
             android:theme="@style/Theme.AppCompat.DayNight.DarkActionBar">
@@ -19,7 +22,7 @@
         <activity
             android:name=".RWDemoActivity"
             android:exported="true"
-            android:icon="@drawable/rfid_icon_s"
+            android:icon="@drawable/ic_launcher"
             android:label="@string/dwdemo2_app_name"
             android:launchMode="singleInstance"
             android:theme="@android:style/Theme.NoTitleBar">

@@ -83,6 +83,17 @@ GitHub: https://github.com/GelatoCookie/zebra.rfid.rwdemo2
 ---
 See [DESIGN.md](DESIGN.md) for detailed RFID and Barcode operation flows and architecture.
 
+## Version rel0.2 (1.0.3)
+
+This release adds foreground app conflict resolution, global DataWedge control, and a visual branding refresh.
+
+### What's New
+- **Foreground Conflict Resolution**: On startup, the app now detects if the Zebra SDK Sample (`com.zebra.rfid.demo.sdksample`) is in the foreground. If found, it automatically backgrounds the conflicting app and safely launches `RWDemo2`.
+- **Background Alert & Deactivation**: When the app moves to the background, it now plays the system Phone Alarm Tone twice and **globally deactivates DataWedge**. This ensures no other background processes or apps can trigger the scanner or RFID hardware while this app is inactive.
+- **Automatic Reactivation**: DataWedge is automatically re-activated globally when the app returns to the foreground.
+- **New Branding**: Updated app and launch icons with a modern, high-contrast barcode-themed design.
+- **Permission Hardening**: Added `PACKAGE_USAGE_STATS` (for foreground detection) and `KILL_BACKGROUND_PROCESSES` permissions.
+
 ## Version 1.0.2
 
 This release includes suspend/resume behavior hardening and version/branding updates:
@@ -115,6 +126,13 @@ This release includes suspend/resume behavior hardening and version/branding upd
 
 ---
 ## Changelog
+
+### rel0.2 / 1.0.3 (May 28, 2026)
+- Added foreground detection for `com.zebra.rfid.demo.sdksample` with auto-backgrounding logic
+- Implemented background alert (Alarm Tone x2) and global DataWedge deactivation on `onPause`
+- Added global DataWedge reactivation on `onResume`
+- Updated app/launcher icon to new modern barcode design
+- Added `PACKAGE_USAGE_STATS` and `KILL_BACKGROUND_PROCESSES` permissions
 
 ### 1.0.2 (May 27, 2026)
 - On screen-off, app now moves task to background after stopping RFID/barcode scans

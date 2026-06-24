@@ -49,6 +49,14 @@ If profile creation or activation still fails, check device support for RFID and
 - TC27-RFD40P
   TC27-RFD40P | 15.0.77 / 11R01 | AT_FULL_UPDATE_14-35-10.00-UG-U127-STD-ATH-04 | May 2026 |
 
+## Version rel0.2 (1.0.3)
+
+### What's New
+- **Conflict Resolution**: Startup detection for `com.zebra.rfid.demo.sdksample` - automatically backgrounds conflicting app to safely start `RWDemo2`.
+- **Background Alert & Safety**: Plays Alarm Tone x2 and globally deactivates DataWedge on background to prevent resource conflicts.
+- **Auto-Activation**: Re-enables DataWedge globally on resume.
+- **Icon Refresh**: Modernized launcher and app icons with barcode theme.
+
 ## Version 1.0.2
 
 This release includes suspend/resume behavior hardening and version/branding updates:

@@ -5,7 +5,11 @@
 package com.zebra.rfid.rwdemo2;
 
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.app.AlertDialog;
+import android.app.AppOpsManager;
+import android.app.usage.UsageStats;
+import android.app.usage.UsageStatsManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -24,7 +28,10 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.LayerDrawable;
 import android.graphics.drawable.ShapeDrawable;
 import android.media.AudioManager;
+import android.media.Ringtone;
+import android.media.RingtoneManager;
 import android.media.ToneGenerator;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -55,6 +62,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.SortedMap;
+import java.util.TreeMap;
 
 import static com.zebra.rfid.rwdemo2.RWDemoIntentParams.*;
 
@@ -227,6 +236,8 @@ public class  RWDemoActivity extends Activity implements OnClickListener,    OnM
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        detectAndBackgroundOtherApp();
 
         // Keep screen on while this activity is in the foreground
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -508,6 +519,10 @@ public class  RWDemoActivity extends Activity implements OnClickListener,    OnM
     public void onResume() {
         Log.d(TAG, "onResume");
         super.onResume();
+        
+        // Ensure DataWedge is enabled when we come back to foreground
+        activateDataWedge();
+
         rwDemoProfileActivated = false;
 
         if(!onNewIntentToOnResume){
@@ -599,6 +614,10 @@ public class  RWDemoActivity extends Activity implements OnClickListener,    OnM
     @Override
     public void onPause() {
         super.onPause();
+
+        Log.d(TAG, "onPause: App going to background, deactivating DW and playing alarm.");
+        playPhoneAlarmTone(2);
+        deactivateDataWedge();
 
         // Stop scanning to preserve battery when leaving activity
         stopRfidScan();
@@ -1331,6 +1350,120 @@ public class  RWDemoActivity extends Activity implements OnClickListener,    OnM
                 progressOverlay.setVisibility(View.GONE);
             }
         });
+    }
+
+    private void detectAndBackgroundOtherApp() {
+        String targetPackage = "com.zebra.rfid.demo.sdksample";
+        Log.d(TAG, "Detecting if " + targetPackage + " is in foreground...");
+        
+        if (isAppInForeground(targetPackage)) {
+            Log.d(TAG, "Target app is in foreground. Moving to background via Home intent.");
+            
+            // Put everything to background (Go to Home screen)
+            Intent homeIntent = new Intent(Intent.ACTION_MAIN);
+            homeIntent.addCategory(Intent.CATEGORY_HOME);
+            homeIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(homeIntent);
+
+            // Wait a moment and then bring OUR app back to the foreground
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                Log.d(TAG, "Safely starting our app (com.zebra.rfid.rwdemo2) after backgrounding the other.");
+                Intent resumeIntent = new Intent(this, RWDemoActivity.class);
+                resumeIntent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(resumeIntent);
+            }, 1000);
+        } else {
+            Log.d(TAG, "Target app is not in foreground.");
+        }
+
+        // Also attempt to kill it if it's in background to release resources
+        try {
+            ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+            am.killBackgroundProcesses(targetPackage);
+            Log.d(TAG, "Requested killBackgroundProcesses for " + targetPackage);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to kill background process: " + e.getMessage());
+        }
+    }
+
+    private boolean isAppInForeground(String packageName) {
+        // 1. Try UsageStatsManager if permission is granted
+        if (hasUsageStatsPermission()) {
+            UsageStatsManager usm = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
+            long time = System.currentTimeMillis();
+            List<UsageStats> appList = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, time - 1000 * 60, time);
+            if (appList != null && !appList.isEmpty()) {
+                SortedMap<Long, UsageStats> mySortedMap = new TreeMap<>();
+                for (UsageStats usageStats : appList) {
+                    mySortedMap.put(usageStats.getLastTimeUsed(), usageStats);
+                }
+                if (!mySortedMap.isEmpty()) {
+                    UsageStats lastStats = mySortedMap.get(mySortedMap.lastKey());
+                    if (lastStats != null) {
+                        String currentApp = lastStats.getPackageName();
+                        return packageName.equals(currentApp);
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback to ActivityManager (works on many enterprise/older devices)
+        ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+        List<ActivityManager.RunningAppProcessInfo> processes = am.getRunningAppProcesses();
+        if (processes != null) {
+            for (ActivityManager.RunningAppProcessInfo process : processes) {
+                if (process.processName.equals(packageName)) {
+                    return process.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean hasUsageStatsPermission() {
+        AppOpsManager appOps = (AppOpsManager) getSystemService(Context.APP_OPS_SERVICE);
+        int mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(), getPackageName());
+        return mode == AppOpsManager.MODE_ALLOWED;
+    }
+
+    private void deactivateDataWedge() {
+        Intent i = new Intent();
+        i.setAction(RWDemoIntentParams.ACTION);
+        i.putExtra("com.symbol.datawedge.api.ENABLE_DATAWEDGE", false);
+        sendBroadcast(i);
+        Log.d(TAG, "Sent intent to deactivate DataWedge globally.");
+    }
+
+    private void activateDataWedge() {
+        Intent i = new Intent();
+        i.setAction(RWDemoIntentParams.ACTION);
+        i.putExtra("com.symbol.datawedge.api.ENABLE_DATAWEDGE", true);
+        sendBroadcast(i);
+        Log.d(TAG, "Sent intent to activate DataWedge globally.");
+    }
+
+    private void playPhoneAlarmTone(int count) {
+        new Thread(() -> {
+            try {
+                Uri alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
+                if (alarmUri == null) {
+                    alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+                }
+                for (int i = 0; i < count; i++) {
+                    Ringtone r = RingtoneManager.getRingtone(getApplicationContext(), alarmUri);
+                    if (r != null) {
+                        r.play();
+                        // Alarm tones can be long. We play for 1.5 seconds then stop for a "twice" effect.
+                        Thread.sleep(1500);
+                        if (r.isPlaying()) r.stop();
+                        Thread.sleep(500);
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error playing alarm tone: " + e.getMessage());
+            }
+        }).start();
     }
 
     private void playAlarmBeep(int count) {
