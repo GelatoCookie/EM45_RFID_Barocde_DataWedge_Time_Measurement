@@ -201,3 +201,7 @@ flowchart TD
     R --> T[Persist and display RFID data received time]
     S --> U[Persist and display barcode data received time]
 ```
+
+### 5.7 Timing Visualization
+
+![Time Measurement Visualization](time.png)
