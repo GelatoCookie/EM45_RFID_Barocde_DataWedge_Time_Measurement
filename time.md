@@ -57,3 +57,147 @@ Data Received Time measures latency from user interaction (tapping a scan button
 ## 4. Why These Metrics Matter
 - **Activation Time** helps identify delays in DataWedge profile switching or hardware initialization (e.g., Bluetooth handshake for RFID sleds).
 - **Data Received Time** quantifies scanning responsiveness from a user perspective.
+
+---
+
+## 5. Detailed Code Snippets and Measurement Flow
+
+The snippets below are aligned with the current implementation in `RWDemoActivity`.
+
+### 5.1 Timer Fields
+
+```java
+private long activationTimerStartMs = -1L;
+private long rfidDataTimerStartMs = -1L;
+private long barcodeDataTimerStartMs = -1L;
+
+private String rfidActivationElapsedLabel;
+private String barcodeWaitingElapsedLabel;
+private String rfidDataReceivedElapsedLabel;
+private String barcodeDataReceivedElapsedLabel;
+```
+
+### 5.2 Activation Baseline Set in `onStart()`
+
+```java
+@Override
+protected void onStart() {
+    super.onStart();
+
+    activationTimerStartMs = SystemClock.elapsedRealtime();
+    rfidActivationTimeReported = false;
+    barcodeWaitingTimeReported = false;
+    activationSummaryDialogShown = false;
+
+    rfidActivationElapsedLabel = null;
+    barcodeWaitingElapsedLabel = null;
+
+    rfidDataTimerStartMs = -1L;
+    rfidDataReceivedElapsedLabel = null;
+    barcodeDataTimerStartMs = -1L;
+    barcodeDataReceivedElapsedLabel = null;
+}
+```
+
+### 5.3 Data Timer Start on User Trigger
+
+```java
+softScanTrigger.setOnClickListener(v -> {
+    if (!rfidScanState) {
+        clearData();
+        rfidDataTimerStartMs = SystemClock.elapsedRealtime();
+        rfidDataReceivedElapsedLabel = null;
+    }
+    toggleSoftRfidTrigger();
+});
+
+barcodeScanTrigger.setOnClickListener(v -> {
+    if (!barcodeScanState) {
+        clearData();
+        barcodeDataTimerStartMs = SystemClock.elapsedRealtime();
+        barcodeDataReceivedElapsedLabel = null;
+    }
+    toggleSoftBarcodeTrigger();
+});
+```
+
+### 5.4 Activation Time Capture from DataWedge Status
+
+```java
+if (intent.hasExtra(RESULT_GET_ACTIVE_PROFILE)) {
+    String activeProfile = intent.getStringExtra(RESULT_GET_ACTIVE_PROFILE);
+    if (BUNDLE_EXTRA_PROFILE_NAME_VAL.equals(activeProfile)) {
+        if (!rfidActivationTimeReported && activationTimerStartMs > 0) {
+            long elapsedMs = SystemClock.elapsedRealtime() - activationTimerStartMs;
+            rfidActivationElapsedLabel = formatElapsedLabel(elapsedMs);
+            rfidActivationTimeReported = true;
+            maybeShowActivationSummaryDialog();
+        }
+    }
+}
+
+if (intent.hasExtra(RESULT_SCANNER_STATUS)) {
+    String status = intent.getStringExtra(RESULT_SCANNER_STATUS);
+    if (STATUS_WAITING.equalsIgnoreCase(status)
+            && !barcodeWaitingTimeReported
+            && activationTimerStartMs > 0) {
+        long elapsedMs = SystemClock.elapsedRealtime() - activationTimerStartMs;
+        barcodeWaitingElapsedLabel = formatElapsedLabel(elapsedMs);
+        barcodeWaitingTimeReported = true;
+        maybeShowActivationSummaryDialog();
+    }
+}
+```
+
+### 5.5 Data Received Time Capture in `handleDecodeData`
+
+```java
+if (data != null && !data.isEmpty()) {
+    boolean isBarcodeSource = DataWedgeSupport.SOURCE_SCANNER.equalsIgnoreCase(source);
+
+    if (!isBarcodeSource && rfidDataTimerStartMs > 0 && rfidDataReceivedElapsedLabel == null) {
+        long elapsedMs = SystemClock.elapsedRealtime() - rfidDataTimerStartMs;
+        rfidDataReceivedElapsedLabel = formatElapsedLabel(elapsedMs);
+    }
+
+    if (isBarcodeSource && barcodeDataTimerStartMs > 0 && barcodeDataReceivedElapsedLabel == null) {
+        long elapsedMs = SystemClock.elapsedRealtime() - barcodeDataTimerStartMs;
+        barcodeDataReceivedElapsedLabel = formatElapsedLabel(elapsedMs);
+    }
+}
+```
+
+### 5.6 End-to-End Measurement Flowchart
+
+```mermaid
+flowchart TD
+    A[App enters foreground in onStart] --> B[Set activationTimerStartMs from elapsedRealtime]
+    B --> C[Wait for DataWedge events]
+
+    C --> D{Active profile is RWDemo}
+    D -->|Yes| E[Compute RFID activation elapsed]
+    E --> F[Store rfidActivationElapsedLabel]
+
+    C --> G{Scanner status is WAITING}
+    G -->|Yes| H[Compute barcode activation elapsed]
+    H --> I[Store barcodeWaitingElapsedLabel]
+
+    F --> J{Both activation labels exist}
+    I --> J
+    J -->|Yes| K[Show activation summary dialog]
+
+    K --> L[User taps Soft Scan or Barcode Scan]
+    L --> M{Which button}
+
+    M -->|Soft Scan| N[Set rfidDataTimerStartMs]
+    M -->|Barcode Scan| O[Set barcodeDataTimerStartMs]
+
+    N --> P[handleDecodeData gets first RFID payload]
+    O --> Q[handleDecodeData gets first barcode payload]
+
+    P --> R[Compute RFID data received elapsed]
+    Q --> S[Compute barcode data received elapsed]
+
+    R --> T[Persist and display RFID data received time]
+    S --> U[Persist and display barcode data received time]
+```
